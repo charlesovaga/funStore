@@ -1,8 +1,9 @@
 const express = require("express");
 const path = require("path");
 const User = require("../model/user");
-const OTP = require("../model/userOtp");
-// const { upload } = require("../multer");
+// const OTP = require("../model/userOtp");
+// const UnverifiedUser = require("../model/unverifiedUserOtp");
+const { upload } = require("../multer");
 const ErrorHandler = require("../utilis/ErrorHandler");
 const catchAsyncErrors = require("../middleware/catchAsyncErrors");
 const jwt = require("jsonwebtoken");
@@ -10,247 +11,167 @@ const sendMail = require("../utilis/sendMail");
 const router = express.Router();
 const sendToken = require("../utilis/jwtToken");
 const { isAuthenticated } = require("../middleware/auth");
-const otpGenerator = require("otp-generator");
+// const otpGenerator = require("otp-generator");
 
+// create user
 router.post("/create-user", async (req, res, next) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, avatar } = req.body;
     const userEmail = await User.findOne({ email });
+
     if (userEmail) {
       return next(new ErrorHandler("User already exists", 400));
     }
 
-    const username = {
+    const user = {
       name: name,
       email: email,
       password: password,
     };
 
+    const activationToken = createActivationToken(user);
+
+    const activationUrl = `http://localhost:3000/user/activation/${activationToken}`;
     try {
-      const generatedOtp = Math.floor(Math.random() * 1000000);
       await sendMail({
-        email: username.email,
-        subject: "Verify your new Raregem account",
-        message: `To verify your email address, please use the following One Time Password (OTP): <b>${generatedOtp}</b>. Do not share this OTP with anyone. Raregem takes your account security very seriously. Raregem Customer Service will never ask you to disclose or verify your Raregem password, OTP, credit card, or banking account number. If you receive a suspicious email with a link to update your account information, do not click on the link-instead, report the email to Raregem for investigation`,
+        email: user.email,
+        subject: "Activate your account",
+        message: `Hello ${user.name}, please click on the link to activate your account: ${activationUrl}`,
       });
       res.status(201).json({
         success: true,
-        message: `We have sent a One Time Password (OTP) to ${username.email} `,
+        message: `please check your email:- ${user.email} to activate your account!`,
       });
-      // if (info.messageId) {
-      //   let user = await User.findOneAndUpdate(
-      //     {email},
-      //     {password},
-      //     {otp: generatedOtp},
-      //     {new: true}
-      //   );
-      //   if (!user){
-      //     return res.status
-      //   }
-      // }
-      // // // Find the most recent OTP for the email
-      // const response = await OTP.find({ email }).sort({ createdAt: -1 }).limit(1);
-      // if (response.length === 0 || otp !== response[0].otp) {
-      //   return res.status(400).json({
-      //     success: false,
-      //     message: "The OTP is not valid",
-      //   });
-      // }
-
-      let user = await User.findOneAndUpdate(
-        { email },
-        { otp: generatedOtp },
-        { new: true }
-      );
-
-      if (user) {
-        return next(new ErrorHandler("User already exists", 400));
-      }
-      user = await User.create({
-        name,
-        otp: generatedOtp,
-        email,
-        password,
-      });
-      await user.save();
     } catch (error) {
-      return next(new ErrorHandler(error.message, 400));
+      return next(new ErrorHandler(error.message, 500));
     }
-
-    //   const filename = req.file.filename;
-    //   //   const fileUrl = path.join(filename);
-    // const user = {
-    //   name: name,
-    //   email: email,
-    //   password: password,
-    // };
-    // const activationToken = createActivationToken(user);
-
-    // const activationUrl = `http://localhost:3000/activation/${activationToken}`;
-
-    // try {
-    //   await sendMail({
-    //     email: user.email,
-    //     subject: "Verify your new Raregem account",
-    //     message: `Hello ${user.name}, please click on the link to activate your account: ${activationUrl}`,
-    //   });
-    //   res.status(201).json({
-    //     success: true,
-    //     message: `Please check your email:- ${user.email} to activate your account`,
-    //   });
-    // } catch (error) {
-    //   return next(new ErrorHandler(error.message, 500));
-    // }
   } catch (error) {
     return next(new ErrorHandler(error.message, 400));
   }
 });
 
 // create activation token
-// const createActivationToken = (user) => {
-//   return jwt.sign(user, process.env.ACTIVATION_SECRET, {
-//     expiresIn: "5m",
-//   });
-// };
+const createActivationToken = (user) => {
+  return jwt.sign(user, process.env.ACTIVATION_SECRET, {
+    expiresIn: "5m",
+  });
+};
 
-router.post("/verify-user", async (req, res, next) => {
-  const { otp } = req.body;
-  try {
-    let user = await User.findOne({ otp });
-    if (!user) {
-      return next(new ErrorHandler("Invalid Otp", 400));
+// activate user
+router.post(
+  "/activation",
+  catchAsyncErrors(async (req, res, next) => {
+    try {
+      const { activation_token } = req.body;
+
+      const newUser = jwt.verify(
+        activation_token,
+        process.env.ACTIVATION_SECRET
+      );
+
+      if (!newUser) {
+        return next(new ErrorHandler("Invalid token", 400));
+      }
+      const { name, email, password } = newUser;
+
+      let user = await User.findOne({ email });
+
+      if (user) {
+        return next(new ErrorHandler("User already exists", 400));
+      }
+      user = await User.create({
+        name,
+        email,
+        avatar,
+        password,
+      });
+
+      sendToken(user, 201, res);
+    } catch (error) {
+      return next(new ErrorHandler(error.message, 500));
     }
-    // const securePassword = await bcrypt.hash(password, 10)
+  })
+);
 
-    user = await User.findOneAndUpdate({ otp }, { new: true });
-    // user = await User.create({
-    //   name,
-    //   email,
-    //   password,
-    // });
-    // await user.save();
-
-    return res.status(201).json({
-      message: "Account Successfully created. Please login to continue",
-    });
-    sendToken(user, 201, res);
-  } catch (error) {
-    return next(new ErrorHandler(error.message, 400));
-  }
-});
-// // activate user
-// router.post(
-//   "/activation",
-//   catchAsyncErrors(async (req, res, next) => {
-//     try {
-//       const { activation_token } = req.body;
-
-//       const newUser = jwt.verify(
-//         activation_token,
-//         process.env.ACTIVATION_SECRET
-//       );
-
-//       if (!newUser) {
-//         return next(new ErrorHandler("Invalid token", 400));
-//       }
-// const { name, email, password } = newUser;
-
-// let user = await User.findOne({ email });
-
-// if (user) {
-//   return next(new ErrorHandler("User already exists", 400));
-// }
-// user = await User.create({
-//   name,
-//   email,
-//   password,
-// });
-
-// sendToken(user, 201, res);
-// }
-//  catch (error) {
-// //       return next(new ErrorHandler(error.message, 500));
-// //     }
-//   })
-// );
-
-// //Request new verification
-// router.post("/send-otp", async (req, res, next) => {
+// //For OTP
+// router.post("/create-user", async (req, res, next) => {
 //   try {
-//     const { email } = req.body;
-//     // Check if user is already present
-//     const checkUserPresent = await User.findOne({ email });
-//     // If user found with provided email
-//     if (checkUserPresent) {
-//       return next(new ErrorHandler("User is already registered", 200));
+//     const { name, email, password, duration } = req.body;
+
+//     // Check if the user already exists in the verified users collection
+//     const userExists = await User.findOne({ email });
+//     if (userExists) {
+//       return next(new ErrorHandler("User already exists", 400));
 //     }
-//     const otp = otpGenerator.generate(6, {
-//       upperCaseAlphabets: false,
-//       lowerCaseAlphabets: false,
-//       specialChars: false,
-//     });
-//     let result = await OTP.findOne({ otp: otp });
-//     while (result) {
-//       otp = otpGenerator.generate(6, {
-//         upperCaseAlphabets: false,
+
+//     // Check if the user already exists in the unverified users collection
+//     const unverifiedUserExists = await UnverifiedUser.findOne({ email });
+//     if (unverifiedUserExists) {
+//       await UnverifiedUser.deleteOne({ email });
+//     }
+
+//     // Generate OTP and send it via email
+//     const generatedOtp = Math.floor(Math.random() * 1000000);
+
+//     try {
+//       await sendMail({
+//         email,
+//         subject: "Verify your new Raregem account",
+//         message: `<p>To verify your email address, please use the following One Time Password (OTP): </p>
+//                   <p style="color:tomato; font-size:25px; letter-spacing:2px;"><b>${generatedOtp}</b></p>
+//                   <p>This code expires in ${duration} hour(s).</p>`,
 //       });
-//       result = await OTP.findOne({ otp: otp });
+//     } catch (error) {
+//       return next(new ErrorHandler("Failed to send OTP email", 500));
 //     }
-//     const otpPayload = { email, otp };
-//     const otpBody = await OTP.create(otpPayload);
-//     return next(new ErrorHandler("OTP sent successfully", otp, 200));
-//     // res.status(200).json({
-//     //   success: true,
-//     //   message: "OTP sent successfully",
-//     //   otp,
-//     // });
+
+//     // Save the unverified user and OTP to the database
+//     const newUnverifiedUser = new UnverifiedUser({
+//       name,
+//       email,
+//       password,
+//       otp: generatedOtp,
+//     });
+//     await newUnverifiedUser.save();
+
+//     res.status(201).json({
+//       success: true,
+//       message: `We have sent a One Time Password (OTP) to ${email}`,
+//     });
 //   } catch (error) {
-//     console.log(error.message);
-//     // return res.status(500).json({ success: false, error: error.message });
-//     return next(new ErrorHandler(error.message, 500));
+//     return next(new ErrorHandler(error.message, 400));
 //   }
 // });
 
-// router.post("/send-otp", async (req, res, next) => {
+// router.post("/verify-user", async (req, res, next) => {
+//   const { email, otp } = req.body;
+//   console.log(`Verifying OTP: ${otp} for Email: ${email}`);
+
 //   try {
-//     const { email, duration = "5m" } = req.body;
-//     if (!email) {
-//       return next(new ErrorHandler("Please provide your email!", 400));
+//     // Find the unverified user and validate the OTP
+//     const unverifiedUser = await UnverifiedUser.findOne({ email, otp });
+//     console.log(
+//       `OTP from database: ${unverifiedUser ? unverifiedUser.otp : "not found"}`
+//     ); // Log the OTP from the database
+
+//     if (!unverifiedUser) {
+//       return next(new ErrorHandler("Invalid OTP", 400));
 //     }
 
-//     //Clearn any old record
-//     await OTP.deleteOne({ email });
-
-//     //Generate pin
-//     const generatedOTP = await generateOTP();
-
-//     const user = {
-//       name: name,
-//       email: email,
-//       password: password,
-//     };
-
-//     //Send Email
-//     await sendMail({
-//       email: user.email,
-//       subject: "Verify your new Raregem account",
-//       message: `<p>To verify your email address, please use the following One Time Password (OTP): </p> <p style="color:tomato; font-size:25px; letter-spacing:2px;"><b>${generatedOTP}</b> for</p><p>This code expires in ${duration} hour(s).</p>`,
+//     // Create new user
+//     const newUser = new User({
+//       name: unverifiedUser.name,
+//       email: unverifiedUser.email,
+//       password: unverifiedUser.password,
 //     });
+//     await newUser.save();
+
+//     // Remove the unverified user record
+//     await UnverifiedUser.deleteOne({ email });
+
 //     res.status(201).json({
-//       success: true,
-//       message: `Please check your email:- ${user.email} to activate your account`,
+//       message: "Account successfully created. Please login to continue.",
 //     });
-
-//     //save OTP record in the database
-//     const newOTP = new OTP({
-//       email,
-//       otp: generatedOTP,
-//       createdAt: Date.now(),
-//       expiresAt: Date.now() + 3600000 * +duration,
-//     });
-
-//     const createdOTPRecord = await newOTP.save();
-//     return createdOTPRecord;
 //   } catch (error) {
 //     return next(new ErrorHandler(error.message, 400));
 //   }

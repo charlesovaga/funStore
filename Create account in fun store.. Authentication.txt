@@ -1,0 +1,134 @@
+router.post("/create-user", async (req, res, next) => {
+  try {
+    const { name, email, password, subject, message, duration } = req.body;
+    const userEmail = await User.findOne({ email });
+    if (userEmail) {
+      return next(new ErrorHandler("User already exists", 400));
+    }
+
+    const username = {
+      name: name,
+      email: email,
+      password: password,
+      subject: subject,
+      message: message,
+      duration: duration,
+    };
+    await OTP.deleteOne({ email });
+    const generatedOtp = Math.floor(Math.random() * 1000000);
+    await sendMail({
+      email: username.email,
+      subject: "Verify your new Raregem account",
+
+      message: `<p>To verify your email address, please use the following One Time Password (OTP): </p> <p style="color:tomato; font-size:25px; letter-spacing:2px;"><b>${generatedOtp}</b> for</p><p>This code expires in ${duration} hour(s).</p>`,
+    });
+    // const newOTP = await new OTP({
+    //   email,
+    //   otp: generatedOtp,
+    //   createdAt: Date.now(),
+    //   expiresAt: Date.now() + 360000 * +duration,
+    // });
+    // const createdOtpRecord = await newOTP.save();
+    // return createdOtpRecord;
+    res.status(201).json({
+      success: true,
+      message: `We have sent a One Time Password (OTP) to ${username.email} `,
+    });
+    // if (info.messageId) {
+    //   let user = await User.findOneAndUpdate(
+    //     {email},
+    //     {password},
+    //     {otp: generatedOtp},
+    //     {new: true}
+    //   );
+    //   if (!user){
+    //     return res.status
+    //   }
+    // }
+    // // // Find the most recent OTP for the email
+    // const response = await OTP.find({ email }).sort({ createdAt: -1 }).limit(1);
+    // if (response.length === 0 || otp !== response[0].otp) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "The OTP is not valid",
+    //   });
+    // }
+
+    let user = await User.findOneAndUpdate(
+      { email },
+      { otp: generatedOtp },
+      { new: true }
+    );
+
+    if (user) {
+      return next(new ErrorHandler("User already exists", 400));
+    }
+    user = await User.create({
+      name,
+      otp: generatedOtp,
+      email,
+      password,
+    });
+    await user.save();
+
+    // //   const filename = req.file.filename;
+    //   //   const fileUrl = path.join(filename);
+    // const user = {
+    //   name: name,
+    //   email: email,
+    //   password: password,
+    // };
+    // const activationToken = createActivationToken(user);
+
+    // const activationUrl = `http://localhost:3000/activation/${activationToken}`;
+
+    // try {
+    //   await sendMail({
+    //     email: user.email,
+    //     subject: "Verify your new Raregem account",
+    //     message: `Hello ${user.name}, please click on the link to activate your account: ${activationUrl}`,
+    //   });
+    //   res.status(201).json({
+    //     success: true,
+    //     message: `Please check your email:- ${user.email} to activate your account`,
+    //   });
+    // } catch (error) {
+    //   return next(new ErrorHandler(error.message, 500));
+    // }
+  } catch (error) {
+    return next(new ErrorHandler(error.message, 400));
+  }
+});
+
+// create activation token
+const createActivationToken = (user) => {
+  return jwt.sign(user, process.env.ACTIVATION_SECRET, {
+    expiresIn: "5m",
+  });
+};
+
+router.post("/verify-user", async (req, res, next) => {
+  const { otp } = req.body;
+  try {
+    let user = await User.findOne({ otp });
+    if (!user) {
+      return next(new ErrorHandler("Invalid Otp", 400));
+    }
+    // const securePassword = await bcrypt.hash(password, 10);
+
+    user = await User.findOneAndUpdate({ otp }, { new: true });
+    user = await User.create({
+      name,
+      email,
+      password,
+    });
+    await user.save();
+
+    return res.status(201).json({
+      message: "Account Successfully created. Please login to continue",
+    });
+    sendToken(user, 201, res);
+  } catch (error) {
+    return next(new ErrorHandler(error.message, 400));
+  }
+});
